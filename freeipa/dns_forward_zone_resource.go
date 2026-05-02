@@ -28,6 +28,7 @@ import (
 )
 
 var _ resource.Resource = &dnsForwardZone{}
+var _ resource.ResourceWithImportState = &dnsForwardZone{}
 
 type dnsForwardZone struct {
 	client *ipa.Client
@@ -123,6 +124,71 @@ func (r *dnsForwardZone) Schema(ctx context.Context, req resource.SchemaRequest,
 }
 
 func (r *dnsForwardZone) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var data dnsForwardZoneModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("[DEBUG] Create freeipa dns forward zone %s", data.ZoneName.ValueString()))
+
+	addOpt := ipa.DnsforwardzoneAddOptionalArgs{}
+	var name interface{} = data.ZoneName.ValueString()
+	addOpt.Idnsname = &name
+
+	var fwd []string
+	for _, value := range data.Forwarders.Elements() {
+		val, _ := strconv.Unquote(value.String())
+		fwd = append(fwd, val)
+	}
+	addOpt.Idnsforwarders = &fwd
+
+	if !data.ForwardPolicy.IsNull() && !data.ForwardPolicy.IsUnknown() {
+		s := data.ForwardPolicy.ValueString()
+		addOpt.Idnsforwardpolicy = &s
+	}
+
+	if data.SkipOverlapCheck.ValueBool() {
+		b := true
+		addOpt.SkipOverlapCheck = &b
+	}
+
+	res, err := r.client.DnsforwardzoneAdd(&ipa.DnsforwardzoneAddArgs{}, &addOpt)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error creating freeipa dns forward zone: %s", err))
+		return
+	}
+
+	dnsnames := res.Result.Idnsname.([]interface{})
+	dnsname := dnsnames[0].(map[string]interface{})["__dns_name__"].(string)
+	data.Id = types.StringValue(dnsname)
+	data.ComputedZoneName = types.StringValue(dnsname)
+
+	if data.DisableZone.ValueBool() {
+		var idName interface{} = data.Id.ValueString()
+		if _, derr := r.client.DnsforwardzoneDisable(
+			&ipa.DnsforwardzoneDisableArgs{},
+			&ipa.DnsforwardzoneDisableOptionalArgs{Idnsname: &idName},
+		); derr != nil {
+			delIDs := []interface{}{data.Id.ValueString()}
+			_, _ = r.client.DnsforwardzoneDel(
+				&ipa.DnsforwardzoneDelArgs{},
+				&ipa.DnsforwardzoneDelOptionalArgs{Idnsname: &delIDs},
+			)
+			resp.Diagnostics.AddError(
+				"Client Error",
+				fmt.Sprintf("Failed to disable forward zone %s after create; rolled back: %s", data.Id.ValueString(), derr),
+			)
+			return
+		}
+	}
+
+	if _, err := r.readZone(ctx, &data, &resp.Diagnostics); err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error refreshing freeipa dns forward zone after create: %s", err))
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *dnsForwardZone) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -146,8 +212,126 @@ func (r *dnsForwardZone) Read(ctx context.Context, req resource.ReadRequest, res
 }
 
 func (r *dnsForwardZone) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var data, state dnsForwardZoneModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("[DEBUG] Update freeipa dns forward zone %s", data.ZoneName.ValueString()))
+
+	modOpt := ipa.DnsforwardzoneModOptionalArgs{}
+	var name interface{} = data.Id.ValueString()
+	modOpt.Idnsname = &name
+	hasChange := false
+
+	if !data.Forwarders.Equal(state.Forwarders) {
+		var v []string
+		for _, value := range data.Forwarders.Elements() {
+			val, _ := strconv.Unquote(value.String())
+			v = append(v, val)
+		}
+		if v == nil {
+			v = []string{}
+		}
+		modOpt.Idnsforwarders = &v
+		hasChange = true
+	}
+
+	if !data.ForwardPolicy.Equal(state.ForwardPolicy) && !data.ForwardPolicy.IsNull() {
+		s := data.ForwardPolicy.ValueString()
+		modOpt.Idnsforwardpolicy = &s
+		hasChange = true
+	}
+
+	if hasChange {
+		if _, err := r.client.DnsforwardzoneMod(&ipa.DnsforwardzoneModArgs{}, &modOpt); err != nil {
+			if strings.Contains(err.Error(), "EmptyModlist") {
+				resp.Diagnostics.AddWarning("Client Warning", err.Error())
+			} else {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error updating freeipa dns forward zone: %s", err))
+				return
+			}
+		}
+	}
+
+	if !data.DisableZone.Equal(state.DisableZone) {
+		var idName interface{} = data.Id.ValueString()
+		if data.DisableZone.ValueBool() {
+			if _, err := r.client.DnsforwardzoneDisable(
+				&ipa.DnsforwardzoneDisableArgs{},
+				&ipa.DnsforwardzoneDisableOptionalArgs{Idnsname: &idName},
+			); err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error disabling forward zone: %s", err))
+				return
+			}
+		} else {
+			if _, err := r.client.DnsforwardzoneEnable(
+				&ipa.DnsforwardzoneEnableArgs{},
+				&ipa.DnsforwardzoneEnableOptionalArgs{Idnsname: &idName},
+			); err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error enabling forward zone: %s", err))
+				return
+			}
+		}
+	}
+
+	if _, err := r.readZone(ctx, &data, &resp.Diagnostics); err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error refreshing freeipa dns forward zone after update: %s", err))
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
+
 func (r *dnsForwardZone) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var data dnsForwardZoneModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("[DEBUG] Delete freeipa dns forward zone %s", data.Id.ValueString()))
+
+	ids := []interface{}{data.Id.ValueString()}
+	if _, err := r.client.DnsforwardzoneDel(
+		&ipa.DnsforwardzoneDelArgs{},
+		&ipa.DnsforwardzoneDelOptionalArgs{Idnsname: &ids},
+	); err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error deleting freeipa dns forward zone: %s", err))
+	}
+}
+
+func (r *dnsForwardZone) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	all := true
+	var name interface{} = req.ID
+	res, err := r.client.DnsforwardzoneShow(
+		&ipa.DnsforwardzoneShowArgs{},
+		&ipa.DnsforwardzoneShowOptionalArgs{Idnsname: &name, All: &all},
+	)
+	if err != nil {
+		resp.Diagnostics.AddError("Import Error", fmt.Sprintf("Error reading freeipa dns forward zone: %s", err))
+		return
+	}
+	dnsnames := res.Result.Idnsname.([]interface{})
+	dnsname := dnsnames[0].(map[string]interface{})["__dns_name__"].(string)
+
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("zone_name"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), dnsname)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("computed_zone_name"), dnsname)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("skip_overlap_check"), false)...)
+	if res.Result.Idnszoneactive != nil {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("disable_zone"), !*res.Result.Idnszoneactive)...)
+	} else {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("disable_zone"), false)...)
+	}
+	if res.Result.Idnsforwardpolicy != nil {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("forward_policy"), *res.Result.Idnsforwardpolicy)...)
+	}
+	if res.Result.Idnsforwarders != nil {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("forwarders"), *res.Result.Idnsforwarders)...)
+	}
 }
 
 func (r *dnsForwardZone) readZone(ctx context.Context, data *dnsForwardZoneModel, diags *diag.Diagnostics) (*ipa.Dnsforwardzone, error) {
@@ -191,9 +375,3 @@ func (r *dnsForwardZone) readZone(ctx context.Context, data *dnsForwardZoneModel
 
 	return z, nil
 }
-
-// suppress unused-import warnings until Task 9 lands Create/Update/Delete/Import.
-var (
-	_ = strconv.Quote
-	_ = path.Root
-)
