@@ -827,3 +827,22 @@ func testAccFreeIPADNSServer_resource(dataset map[string]string) string {
 	tf_def += "}\n"
 	return tf_def
 }
+
+func testAccFreeIPADNSForwardZone_resource(dataset map[string]string) string {
+	tf_def := fmt.Sprintf(`
+	resource "freeipa_dns_forward_zone" "fwd-zone-%s" {
+	  zone_name  = %s
+	  forwarders = %s
+`, dataset["index"], dataset["zone_name"], dataset["forwarders"])
+	if dataset["forward_policy"] != "" {
+		tf_def += fmt.Sprintf("  forward_policy     = %s\n", dataset["forward_policy"])
+	}
+	if dataset["disable_zone"] != "" {
+		tf_def += fmt.Sprintf("  disable_zone       = %s\n", dataset["disable_zone"])
+	}
+	if dataset["skip_overlap_check"] != "" {
+		tf_def += fmt.Sprintf("  skip_overlap_check = %s\n", dataset["skip_overlap_check"])
+	}
+	tf_def += "}\n"
+	return tf_def
+}
