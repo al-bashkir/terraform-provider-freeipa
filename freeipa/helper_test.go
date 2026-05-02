@@ -789,3 +789,23 @@ func testAccFreeIPAHbacPolicyServiceMembership_resource(dataset map[string]strin
 	tf_def += "}\n"
 	return tf_def
 }
+
+func testAccFreeIPADNSGlobalConfig_resource(dataset map[string]string) string {
+	tf_def := `
+	resource "freeipa_dns_global_config" "global" {
+`
+	if dataset["forwarders"] != "" {
+		tf_def += fmt.Sprintf("  forwarders     = %s\n", dataset["forwarders"])
+	}
+	if dataset["forward_policy"] != "" {
+		tf_def += fmt.Sprintf("  forward_policy = %s\n", dataset["forward_policy"])
+	}
+	if dataset["allow_sync_ptr"] != "" {
+		tf_def += fmt.Sprintf("  allow_sync_ptr = %s\n", dataset["allow_sync_ptr"])
+	}
+	if dataset["zone_refresh"] != "" {
+		tf_def += fmt.Sprintf("  zone_refresh   = %s\n", dataset["zone_refresh"])
+	}
+	tf_def += "}\n"
+	return tf_def
+}
