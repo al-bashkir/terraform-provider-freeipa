@@ -26,6 +26,7 @@ import (
 )
 
 var _ resource.Resource = &dnsGlobalConfig{}
+var _ resource.ResourceWithImportState = &dnsGlobalConfig{}
 
 type dnsGlobalConfig struct {
 	client *ipa.Client
@@ -114,6 +115,32 @@ func (r *dnsGlobalConfig) Configure(ctx context.Context, req resource.ConfigureR
 }
 
 func (r *dnsGlobalConfig) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var data dnsGlobalConfigModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	tflog.Debug(ctx, "[DEBUG] Create freeipa dns global config")
+
+	optArgs, hasChange := r.buildModOptArgs(ctx, &data, nil)
+	if hasChange {
+		if _, err := r.client.DnsconfigMod(&ipa.DnsconfigModArgs{}, optArgs); err != nil {
+			if strings.Contains(err.Error(), "EmptyModlist") {
+				resp.Diagnostics.AddWarning("Client Warning", err.Error())
+			} else {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error applying freeipa dns global config: %s", err))
+				return
+			}
+		}
+	}
+
+	if _, err := r.readGlobalConfig(ctx, &data, &resp.Diagnostics); err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error refreshing freeipa dns global config after create: %s", err))
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *dnsGlobalConfig) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -137,8 +164,139 @@ func (r *dnsGlobalConfig) Read(ctx context.Context, req resource.ReadRequest, re
 }
 
 func (r *dnsGlobalConfig) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var data, state dnsGlobalConfigModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	tflog.Debug(ctx, "[DEBUG] Update freeipa dns global config")
+
+	optArgs, hasChange := r.buildModOptArgs(ctx, &data, &state)
+	if hasChange {
+		if _, err := r.client.DnsconfigMod(&ipa.DnsconfigModArgs{}, optArgs); err != nil {
+			if strings.Contains(err.Error(), "EmptyModlist") {
+				resp.Diagnostics.AddWarning("Client Warning", err.Error())
+			} else {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error updating freeipa dns global config: %s", err))
+				return
+			}
+		}
+	}
+
+	if _, err := r.readGlobalConfig(ctx, &data, &resp.Diagnostics); err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error refreshing freeipa dns global config after update: %s", err))
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
+
 func (r *dnsGlobalConfig) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var data dnsGlobalConfigModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	tflog.Debug(ctx, "[DEBUG] Delete freeipa dns global config — reverting managed attrs to defaults")
+
+	defaultPolicy := "first"
+	defaultAllowSync := false
+	delAttrs := []string{}
+	if !data.Forwarders.IsNull() {
+		delAttrs = append(delAttrs, "idnsforwarders")
+	}
+	if !data.ZoneRefresh.IsNull() {
+		delAttrs = append(delAttrs, "idnszonerefresh")
+	}
+
+	optArgs := ipa.DnsconfigModOptionalArgs{}
+	if !data.ForwardPolicy.IsNull() {
+		optArgs.Idnsforwardpolicy = &defaultPolicy
+	}
+	if !data.AllowSyncPTR.IsNull() {
+		optArgs.Idnsallowsyncptr = &defaultAllowSync
+	}
+	if len(delAttrs) > 0 {
+		optArgs.Delattr = &delAttrs
+	}
+
+	if optArgs.Idnsforwardpolicy == nil && optArgs.Idnsallowsyncptr == nil && optArgs.Delattr == nil {
+		return
+	}
+
+	if _, err := r.client.DnsconfigMod(&ipa.DnsconfigModArgs{}, &optArgs); err != nil {
+		if strings.Contains(err.Error(), "EmptyModlist") {
+			resp.Diagnostics.AddWarning("Client Warning", err.Error())
+			return
+		}
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error reverting freeipa dns global config on delete: %s", err))
+	}
+}
+
+func (r *dnsGlobalConfig) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	if req.ID != "global" {
+		resp.Diagnostics.AddError("Import Error", "freeipa_dns_global_config is a singleton — import id must be the literal string \"global\"")
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), "global")...)
+}
+
+func (r *dnsGlobalConfig) buildModOptArgs(ctx context.Context, data *dnsGlobalConfigModel, prev *dnsGlobalConfigModel) (*ipa.DnsconfigModOptionalArgs, bool) {
+	optArgs := ipa.DnsconfigModOptionalArgs{}
+	hasChange := false
+	delAttrs := []string{}
+
+	if prev == nil || !data.Forwarders.Equal(prev.Forwarders) {
+		if data.Forwarders.IsNull() {
+			delAttrs = append(delAttrs, "idnsforwarders")
+		} else {
+			var v []string
+			for _, value := range data.Forwarders.Elements() {
+				val, _ := strconv.Unquote(value.String())
+				v = append(v, val)
+			}
+			if v == nil {
+				v = []string{}
+			}
+			optArgs.Idnsforwarders = &v
+		}
+		hasChange = true
+	}
+
+	if prev == nil || !data.ForwardPolicy.Equal(prev.ForwardPolicy) {
+		if !data.ForwardPolicy.IsNull() {
+			s := data.ForwardPolicy.ValueString()
+			optArgs.Idnsforwardpolicy = &s
+		}
+		hasChange = true
+	}
+
+	if prev == nil || !data.AllowSyncPTR.Equal(prev.AllowSyncPTR) {
+		if !data.AllowSyncPTR.IsNull() {
+			b := data.AllowSyncPTR.ValueBool()
+			optArgs.Idnsallowsyncptr = &b
+		}
+		hasChange = true
+	}
+
+	if prev == nil || !data.ZoneRefresh.Equal(prev.ZoneRefresh) {
+		if data.ZoneRefresh.IsNull() {
+			delAttrs = append(delAttrs, "idnszonerefresh")
+		} else {
+			n := int(data.ZoneRefresh.ValueInt64())
+			optArgs.Idnszonerefresh = &n
+		}
+		hasChange = true
+	}
+
+	if len(delAttrs) > 0 {
+		optArgs.Delattr = &delAttrs
+	}
+
+	return &optArgs, hasChange
 }
 
 // readGlobalConfig calls dnsconfig_show and copies remote attrs into the model.
@@ -206,9 +364,3 @@ func (r *dnsGlobalConfig) readGlobalConfig(ctx context.Context, data *dnsGlobalC
 	data.Id = types.StringValue("global")
 	return cfg, nil
 }
-
-// suppress unused import warnings until Update/ImportState land in Task 3.
-var (
-	_ = strconv.Quote
-	_ = path.Root
-)
