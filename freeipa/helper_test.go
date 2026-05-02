@@ -809,3 +809,21 @@ func testAccFreeIPADNSGlobalConfig_resource(dataset map[string]string) string {
 	tf_def += "}\n"
 	return tf_def
 }
+
+func testAccFreeIPADNSServer_resource(dataset map[string]string) string {
+	tf_def := fmt.Sprintf(`
+	resource "freeipa_dns_server" "dns-server-%s" {
+	  server_name = %s
+`, dataset["index"], dataset["server_name"])
+	if dataset["soa_mname_override"] != "" {
+		tf_def += fmt.Sprintf("  soa_mname_override = %s\n", dataset["soa_mname_override"])
+	}
+	if dataset["forwarders"] != "" {
+		tf_def += fmt.Sprintf("  forwarders     = %s\n", dataset["forwarders"])
+	}
+	if dataset["forward_policy"] != "" {
+		tf_def += fmt.Sprintf("  forward_policy = %s\n", dataset["forward_policy"])
+	}
+	tf_def += "}\n"
+	return tf_def
+}
