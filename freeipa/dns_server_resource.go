@@ -1,5 +1,5 @@
 // Authors:
-//   Pavel Aksenov <aksenov.pavel.v@gmail.com>
+//   Pavel Aksenov <41126916+al-bashkir@users.noreply.github.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
