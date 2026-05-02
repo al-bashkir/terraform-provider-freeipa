@@ -26,6 +26,7 @@ import (
 )
 
 var _ resource.Resource = &dnsServer{}
+var _ resource.ResourceWithImportState = &dnsServer{}
 
 type dnsServer struct {
 	client *ipa.Client
@@ -101,6 +102,49 @@ func (r *dnsServer) Schema(ctx context.Context, req resource.SchemaRequest, resp
 }
 
 func (r *dnsServer) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var data dnsServerModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("[DEBUG] Create freeipa dns server %s", data.ServerName.ValueString()))
+
+	all := true
+	if _, err := r.client.DnsserverShow(
+		&ipa.DnsserverShowArgs{Idnsserverid: data.ServerName.ValueString()},
+		&ipa.DnsserverShowOptionalArgs{All: &all},
+	); err != nil {
+		if strings.Contains(err.Error(), "NotFound") {
+			resp.Diagnostics.AddError(
+				"DNS server not found",
+				fmt.Sprintf("Run ipa-dns-install on '%s' before managing it via Terraform", data.ServerName.ValueString()),
+			)
+			return
+		}
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error verifying freeipa dns server existence: %s", err))
+		return
+	}
+
+	optArgs, hasChange := r.buildModOptArgs(ctx, &data, nil)
+	if hasChange {
+		args := ipa.DnsserverModArgs{Idnsserverid: data.ServerName.ValueString()}
+		if _, err := r.client.DnsserverMod(&args, optArgs); err != nil {
+			if strings.Contains(err.Error(), "EmptyModlist") {
+				resp.Diagnostics.AddWarning("Client Warning", err.Error())
+			} else {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error applying freeipa dns server config: %s", err))
+				return
+			}
+		}
+	}
+
+	if _, err := r.readServer(ctx, &data, &resp.Diagnostics); err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error refreshing freeipa dns server after create: %s", err))
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 func (r *dnsServer) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var data dnsServerModel
@@ -122,8 +166,119 @@ func (r *dnsServer) Read(ctx context.Context, req resource.ReadRequest, resp *re
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 func (r *dnsServer) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var data, state dnsServerModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("[DEBUG] Update freeipa dns server %s", data.ServerName.ValueString()))
+
+	optArgs, hasChange := r.buildModOptArgs(ctx, &data, &state)
+	if hasChange {
+		args := ipa.DnsserverModArgs{Idnsserverid: data.ServerName.ValueString()}
+		if _, err := r.client.DnsserverMod(&args, optArgs); err != nil {
+			if strings.Contains(err.Error(), "EmptyModlist") {
+				resp.Diagnostics.AddWarning("Client Warning", err.Error())
+			} else {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error updating freeipa dns server: %s", err))
+				return
+			}
+		}
+	}
+
+	if _, err := r.readServer(ctx, &data, &resp.Diagnostics); err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error refreshing freeipa dns server after update: %s", err))
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
+
 func (r *dnsServer) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var data dnsServerModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("[DEBUG] Delete freeipa dns server %s — clearing managed attrs", data.ServerName.ValueString()))
+
+	delAttrs := []string{}
+	if !data.SOAMnameOverride.IsNull() {
+		delAttrs = append(delAttrs, "idnssoamname")
+	}
+	if !data.Forwarders.IsNull() {
+		delAttrs = append(delAttrs, "idnsforwarders")
+	}
+	if !data.ForwardPolicy.IsNull() {
+		delAttrs = append(delAttrs, "idnsforwardpolicy")
+	}
+	if len(delAttrs) == 0 {
+		return
+	}
+
+	optArgs := ipa.DnsserverModOptionalArgs{Delattr: &delAttrs}
+	args := ipa.DnsserverModArgs{Idnsserverid: data.ServerName.ValueString()}
+	if _, err := r.client.DnsserverMod(&args, &optArgs); err != nil {
+		if strings.Contains(err.Error(), "EmptyModlist") {
+			resp.Diagnostics.AddWarning("Client Warning", err.Error())
+			return
+		}
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error clearing freeipa dns server config on delete: %s", err))
+	}
+}
+
+func (r *dnsServer) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("server_name"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+}
+
+func (r *dnsServer) buildModOptArgs(ctx context.Context, data *dnsServerModel, prev *dnsServerModel) (*ipa.DnsserverModOptionalArgs, bool) {
+	optArgs := ipa.DnsserverModOptionalArgs{}
+	hasChange := false
+	delAttrs := []string{}
+
+	if prev == nil || !data.SOAMnameOverride.Equal(prev.SOAMnameOverride) {
+		if data.SOAMnameOverride.IsNull() {
+			delAttrs = append(delAttrs, "idnssoamname")
+		} else {
+			var v interface{} = data.SOAMnameOverride.ValueString()
+			optArgs.Idnssoamname = &v
+		}
+		hasChange = true
+	}
+
+	if prev == nil || !data.Forwarders.Equal(prev.Forwarders) {
+		if data.Forwarders.IsNull() {
+			delAttrs = append(delAttrs, "idnsforwarders")
+		} else {
+			var v []string
+			for _, value := range data.Forwarders.Elements() {
+				val, _ := strconv.Unquote(value.String())
+				v = append(v, val)
+			}
+			if v == nil {
+				v = []string{}
+			}
+			optArgs.Idnsforwarders = &v
+		}
+		hasChange = true
+	}
+
+	if prev == nil || !data.ForwardPolicy.Equal(prev.ForwardPolicy) {
+		if !data.ForwardPolicy.IsNull() {
+			s := data.ForwardPolicy.ValueString()
+			optArgs.Idnsforwardpolicy = &s
+		}
+		hasChange = true
+	}
+
+	if len(delAttrs) > 0 {
+		optArgs.Delattr = &delAttrs
+	}
+	return &optArgs, hasChange
 }
 
 func (r *dnsServer) readServer(ctx context.Context, data *dnsServerModel, diags *diag.Diagnostics) (*ipa.Dnsserver, error) {
@@ -171,9 +326,3 @@ func (r *dnsServer) readServer(ctx context.Context, data *dnsServerModel, diags 
 
 	return srv, nil
 }
-
-// suppress unused-import warnings until Task 6 lands buildModOptArgs/Import.
-var (
-	_ = strconv.Quote
-	_ = path.Root
-)
