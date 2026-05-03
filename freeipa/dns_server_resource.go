@@ -305,12 +305,8 @@ func (r *dnsServer) readServer(ctx context.Context, data *dnsServerModel, diags 
 	data.ServerName = types.StringValue(srv.Idnsserverid)
 
 	if !data.SOAMnameOverride.IsNull() {
-		if srv.Idnssoamname != nil {
-			if v, ok := (*srv.Idnssoamname).(string); ok {
-				data.SOAMnameOverride = types.StringValue(v)
-			} else {
-				data.SOAMnameOverride = types.StringNull()
-			}
+		if v, ok := decodeIPAString(srv.Idnssoamname); ok {
+			data.SOAMnameOverride = types.StringValue(v)
 		} else {
 			data.SOAMnameOverride = types.StringNull()
 		}
@@ -335,4 +331,26 @@ func (r *dnsServer) readServer(ctx context.Context, data *dnsServerModel, diags 
 	}
 
 	return srv, nil
+}
+
+// decodeIPAString unwraps a *interface{} attribute returned by the IPA
+// JSON-RPC layer. IPA encodes single-valued LDAP attributes as a one-element
+// list, which go-freeipa surfaces as []interface{}{string}; some attrs and
+// older IPA versions surface a plain string.
+func decodeIPAString(p *interface{}) (string, bool) {
+	if p == nil {
+		return "", false
+	}
+	switch x := (*p).(type) {
+	case string:
+		return x, true
+	case []interface{}:
+		if len(x) == 0 {
+			return "", false
+		}
+		if s, ok := x[0].(string); ok {
+			return s, true
+		}
+	}
+	return "", false
 }
