@@ -803,9 +803,6 @@ func testAccFreeIPADNSGlobalConfig_resource(dataset map[string]string) string {
 	if dataset["allow_sync_ptr"] != "" {
 		tf_def += fmt.Sprintf("  allow_sync_ptr = %s\n", dataset["allow_sync_ptr"])
 	}
-	if dataset["zone_refresh"] != "" {
-		tf_def += fmt.Sprintf("  zone_refresh   = %s\n", dataset["zone_refresh"])
-	}
 	tf_def += "}\n"
 	return tf_def
 }

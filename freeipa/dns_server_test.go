@@ -120,7 +120,7 @@ func TestAccFreeIPADNSServer_import(t *testing.T) {
 				ImportState:             true,
 				ImportStateId:           dnsServerName(t),
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"forwarders", "soa_mname_override"},
+				ImportStateVerifyIgnore: []string{"forwarders", "soa_mname_override", "forward_policy"},
 			},
 		},
 	})

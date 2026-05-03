@@ -34,6 +34,22 @@ type dnsForwardZone struct {
 	client *ipa.Client
 }
 
+// FreeIPA >= 4.12 returns "managedby": null in dnsforwardzone responses, which
+// the go-freeipa library rejects during JSON decoding. Detect that error so we
+// can fall back to input-derived values.
+func isManagedbyNullErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "unexpected value for field Managedby")
+}
+
+// canonicalZoneName mirrors FreeIPA's normalization: lowercase + trailing dot.
+func canonicalZoneName(name string) string {
+	n := strings.ToLower(name)
+	if !strings.HasSuffix(n, ".") {
+		n += "."
+	}
+	return n
+}
+
 type dnsForwardZoneModel struct {
 	Id               types.String `tfsdk:"id"`
 	ZoneName         types.String `tfsdk:"zone_name"`
@@ -155,25 +171,32 @@ func (r *dnsForwardZone) Create(ctx context.Context, req resource.CreateRequest,
 
 	res, err := r.client.DnsforwardzoneAdd(&ipa.DnsforwardzoneAddArgs{}, &addOpt)
 	if err != nil {
-		if !strings.Contains(err.Error(), "unexpected value for field Managedby") {
+		if !isManagedbyNullErr(err) {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error creating freeipa dns forward zone: %s", err))
 			return
 		}
-		// FreeIPA >= 4.12 returns managedby: null in the Add response; the zone was
-		// created — fetch the canonical name via Show (no All, avoids the same issue).
+		// FreeIPA >= 4.12 returns managedby:null in Add and Show responses; the zone
+		// was created. Try Show first to get FreeIPA's canonical name; if Show also
+		// hits the managedby decode error, synthesize the canonical name from input.
 		var showName interface{} = data.ZoneName.ValueString()
 		showRes, showErr := r.client.DnsforwardzoneShow(
 			&ipa.DnsforwardzoneShowArgs{},
 			&ipa.DnsforwardzoneShowOptionalArgs{Idnsname: &showName},
 		)
 		if showErr != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error verifying freeipa dns forward zone after create: %s", showErr))
-			return
+			if !isManagedbyNullErr(showErr) {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error verifying freeipa dns forward zone after create: %s", showErr))
+				return
+			}
+			dnsname := canonicalZoneName(data.ZoneName.ValueString())
+			data.Id = types.StringValue(dnsname)
+			data.ComputedZoneName = types.StringValue(dnsname)
+		} else {
+			dnsnames := showRes.Result.Idnsname.([]interface{})
+			dnsname := dnsnames[0].(map[string]interface{})["__dns_name__"].(string)
+			data.Id = types.StringValue(dnsname)
+			data.ComputedZoneName = types.StringValue(dnsname)
 		}
-		dnsnames := showRes.Result.Idnsname.([]interface{})
-		dnsname := dnsnames[0].(map[string]interface{})["__dns_name__"].(string)
-		data.Id = types.StringValue(dnsname)
-		data.ComputedZoneName = types.StringValue(dnsname)
 	} else {
 		dnsnames := res.Result.Idnsname.([]interface{})
 		dnsname := dnsnames[0].(map[string]interface{})["__dns_name__"].(string)
@@ -327,7 +350,18 @@ func (r *dnsForwardZone) ImportState(ctx context.Context, req resource.ImportSta
 		&ipa.DnsforwardzoneShowOptionalArgs{Idnsname: &name},
 	)
 	if err != nil {
-		resp.Diagnostics.AddError("Import Error", fmt.Sprintf("Error reading freeipa dns forward zone: %s", err))
+		if !isManagedbyNullErr(err) {
+			resp.Diagnostics.AddError("Import Error", fmt.Sprintf("Error reading freeipa dns forward zone: %s", err))
+			return
+		}
+		// FreeIPA >= 4.12: synthesize what we can; forward_policy / forwarders /
+		// disable_zone stay unknown and the user must declare them in config.
+		dnsname := canonicalZoneName(req.ID)
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("zone_name"), req.ID)...)
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), dnsname)...)
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("computed_zone_name"), dnsname)...)
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("skip_overlap_check"), false)...)
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("disable_zone"), false)...)
 		return
 	}
 	dnsnames := res.Result.Idnsname.([]interface{})
@@ -360,6 +394,11 @@ func (r *dnsForwardZone) readZone(ctx context.Context, data *dnsForwardZoneModel
 		&ipa.DnsforwardzoneShowOptionalArgs{Idnsname: &name},
 	)
 	if err != nil {
+		if isManagedbyNullErr(err) {
+			// FreeIPA >= 4.12: cannot decode response. Skip refresh, preserve state.
+			diags.AddWarning("Client Warning", fmt.Sprintf("Skipping refresh of dns forward zone %s: %s", data.ZoneName.ValueString(), err))
+			return nil, nil
+		}
 		return nil, err
 	}
 	tflog.Debug(ctx, fmt.Sprintf("[DEBUG] Read freeipa dns forward zone %s: %s", data.ZoneName.ValueString(), res.String()))

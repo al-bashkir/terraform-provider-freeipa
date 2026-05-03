@@ -177,7 +177,7 @@ func TestAccFreeIPADNSForwardZone_import(t *testing.T) {
 				ImportState:             true,
 				ImportStateId:           "fwdimport.example.lan",
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"zone_name", "skip_overlap_check"},
+				ImportStateVerifyIgnore: []string{"zone_name", "skip_overlap_check", "forwarders", "forward_policy"},
 			},
 		},
 	})

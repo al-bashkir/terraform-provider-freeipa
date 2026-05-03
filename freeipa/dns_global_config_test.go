@@ -52,7 +52,6 @@ func TestAccFreeIPADNSGlobalConfig_update(t *testing.T) {
 		"forwarders":     `["9.9.9.9", "149.112.112.112"]`,
 		"forward_policy": `"only"`,
 		"allow_sync_ptr": "true",
-		"zone_refresh":   "300",
 	}
 
 	resource.Test(t, resource.TestCase{
@@ -65,7 +64,6 @@ func TestAccFreeIPADNSGlobalConfig_update(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("freeipa_dns_global_config.global", "forward_policy", "only"),
 					resource.TestCheckResourceAttr("freeipa_dns_global_config.global", "allow_sync_ptr", "true"),
-					resource.TestCheckResourceAttr("freeipa_dns_global_config.global", "zone_refresh", "300"),
 					resource.TestCheckResourceAttr("freeipa_dns_global_config.global", "forwarders.#", "2"),
 				),
 			},
@@ -116,7 +114,7 @@ func TestAccFreeIPADNSGlobalConfig_import(t *testing.T) {
 				ImportState:             true,
 				ImportStateId:           "global",
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"forwarders", "forward_policy", "allow_sync_ptr", "zone_refresh"},
+				ImportStateVerifyIgnore: []string{"forwarders", "forward_policy", "allow_sync_ptr"},
 			},
 		},
 	})

@@ -37,7 +37,6 @@ type dnsGlobalConfigModel struct {
 	Forwarders      types.List   `tfsdk:"forwarders"`
 	ForwardPolicy   types.String `tfsdk:"forward_policy"`
 	AllowSyncPTR    types.Bool   `tfsdk:"allow_sync_ptr"`
-	ZoneRefresh     types.Int64  `tfsdk:"zone_refresh"`
 	DNSServers      types.List   `tfsdk:"dns_servers"`
 	DNSSECKeyMaster types.String `tfsdk:"dnssec_key_master"`
 	IPADNSVersion   types.Int64  `tfsdk:"ipa_dns_version"`
@@ -53,7 +52,7 @@ func (r *dnsGlobalConfig) Metadata(ctx context.Context, req resource.MetadataReq
 
 func (r *dnsGlobalConfig) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "FreeIPA global DNS configuration. Singleton resource — only one instance per IPA realm. Create reads existing values then applies modifications; Delete reverts managed attributes to FreeIPA documented defaults (forwarders cleared, forward_policy=first, allow_sync_ptr=false, zone_refresh unset).",
+		MarkdownDescription: "FreeIPA global DNS configuration. Singleton resource — only one instance per IPA realm. Create reads existing values then applies modifications; Delete reverts managed attributes to FreeIPA documented defaults (forwarders cleared, forward_policy=first, allow_sync_ptr=false).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "ID of the resource. Always `global` for this singleton.",
@@ -76,10 +75,6 @@ func (r *dnsGlobalConfig) Schema(ctx context.Context, req resource.SchemaRequest
 			},
 			"allow_sync_ptr": schema.BoolAttribute{
 				MarkdownDescription: "Allow synchronization of forward (A, AAAA) and reverse (PTR) records.",
-				Optional:            true,
-			},
-			"zone_refresh": schema.Int64Attribute{
-				MarkdownDescription: "Interval (in seconds) between regular polls of the name server for new DNS zones.",
 				Optional:            true,
 			},
 			"dns_servers": schema.ListAttribute{
@@ -205,7 +200,6 @@ func (r *dnsGlobalConfig) Delete(ctx context.Context, req resource.DeleteRequest
 	defaultPolicy := "first"
 	defaultAllowSync := false
 	optArgs := ipa.DnsconfigModOptionalArgs{}
-	var setAttrs []string
 	if !data.ForwardPolicy.IsNull() {
 		optArgs.Idnsforwardpolicy = &defaultPolicy
 	}
@@ -216,14 +210,8 @@ func (r *dnsGlobalConfig) Delete(ctx context.Context, req resource.DeleteRequest
 		empty := []string{}
 		optArgs.Idnsforwarders = &empty
 	}
-	if !data.ZoneRefresh.IsNull() {
-		setAttrs = append(setAttrs, "idnszonerefresh=")
-	}
-	if len(setAttrs) > 0 {
-		optArgs.Setattr = &setAttrs
-	}
 
-	if optArgs.Idnsforwardpolicy == nil && optArgs.Idnsallowsyncptr == nil && optArgs.Idnsforwarders == nil && optArgs.Setattr == nil {
+	if optArgs.Idnsforwardpolicy == nil && optArgs.Idnsallowsyncptr == nil && optArgs.Idnsforwarders == nil {
 		return
 	}
 
@@ -247,7 +235,6 @@ func (r *dnsGlobalConfig) ImportState(ctx context.Context, req resource.ImportSt
 func (r *dnsGlobalConfig) buildModOptArgs(ctx context.Context, data *dnsGlobalConfigModel, prev *dnsGlobalConfigModel) (*ipa.DnsconfigModOptionalArgs, bool) {
 	optArgs := ipa.DnsconfigModOptionalArgs{}
 	hasChange := false
-	var setAttrs []string
 
 	if prev == nil || !data.Forwarders.Equal(prev.Forwarders) {
 		if !data.Forwarders.IsNull() {
@@ -262,12 +249,10 @@ func (r *dnsGlobalConfig) buildModOptArgs(ctx context.Context, data *dnsGlobalCo
 			optArgs.Idnsforwarders = &v
 			hasChange = true
 		} else if prev != nil {
-			// Update: forwarders cleared — pass empty list.
 			empty := []string{}
 			optArgs.Idnsforwarders = &empty
 			hasChange = true
 		}
-		// Create + null: leave server default unchanged.
 	}
 
 	if prev == nil || !data.ForwardPolicy.Equal(prev.ForwardPolicy) {
@@ -284,22 +269,6 @@ func (r *dnsGlobalConfig) buildModOptArgs(ctx context.Context, data *dnsGlobalCo
 			optArgs.Idnsallowsyncptr = &b
 			hasChange = true
 		}
-	}
-
-	if prev == nil || !data.ZoneRefresh.Equal(prev.ZoneRefresh) {
-		if !data.ZoneRefresh.IsNull() {
-			n := int(data.ZoneRefresh.ValueInt64())
-			optArgs.Idnszonerefresh = &n
-			hasChange = true
-		} else if prev != nil && !prev.ZoneRefresh.IsNull() {
-			// Update: zone_refresh cleared — use setattr to unset.
-			setAttrs = append(setAttrs, "idnszonerefresh=")
-			hasChange = true
-		}
-	}
-
-	if len(setAttrs) > 0 {
-		optArgs.Setattr = &setAttrs
 	}
 
 	return &optArgs, hasChange
@@ -357,13 +326,6 @@ func (r *dnsGlobalConfig) readGlobalConfig(ctx context.Context, data *dnsGlobalC
 			data.AllowSyncPTR = types.BoolValue(*cfg.Idnsallowsyncptr)
 		} else {
 			data.AllowSyncPTR = types.BoolNull()
-		}
-	}
-	if !data.ZoneRefresh.IsNull() {
-		if cfg.Idnszonerefresh != nil {
-			data.ZoneRefresh = types.Int64Value(int64(*cfg.Idnszonerefresh))
-		} else {
-			data.ZoneRefresh = types.Int64Null()
 		}
 	}
 

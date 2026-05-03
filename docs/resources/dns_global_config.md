@@ -1,12 +1,12 @@
 ---
 page_title: "freeipa_dns_global_config Resource - freeipa"
 description: |-
-  FreeIPA global DNS configuration. Singleton resource — only one instance per IPA realm. Create reads existing values then applies modifications; Delete reverts managed attributes to FreeIPA documented defaults (forwarders cleared, forward_policy=first, allow_sync_ptr=false, zone_refresh unset).
+  FreeIPA global DNS configuration. Singleton resource — only one instance per IPA realm. Create reads existing values then applies modifications; Delete reverts managed attributes to FreeIPA documented defaults (forwarders cleared, forward_policy=first, allow_sync_ptr=false).
 ---
 
 # freeipa_dns_global_config (Resource)
 
-FreeIPA global DNS configuration. Singleton resource — only one instance per IPA realm. Create reads existing values then applies modifications; Delete reverts managed attributes to FreeIPA documented defaults (forwarders cleared, forward_policy=first, allow_sync_ptr=false, zone_refresh unset).
+FreeIPA global DNS configuration. Singleton resource — only one instance per IPA realm. Create reads existing values then applies modifications; Delete reverts managed attributes to FreeIPA documented defaults (forwarders cleared, forward_policy=first, allow_sync_ptr=false).
 
 
 ## Example Usage
@@ -16,7 +16,6 @@ resource "freeipa_dns_global_config" "global" {
   forwarders     = ["1.1.1.1", "8.8.8.8 port 5353"]
   forward_policy = "first"
   allow_sync_ptr = true
-  zone_refresh   = 300
 }
 ```
 
@@ -47,7 +46,6 @@ resource "freeipa_dns_global_config" "global" {
 - `allow_sync_ptr` (Boolean) Allow synchronization of forward (A, AAAA) and reverse (PTR) records.
 - `forward_policy` (String) Global forwarding policy. One of `only`, `first`, `none`. Set to `none` to disable any configured global forwarders.
 - `forwarders` (List of String) Global forwarders. A custom port can be specified for each forwarder using a standard format `IP_ADDRESS port PORT`.
-- `zone_refresh` (Number) Interval (in seconds) between regular polls of the name server for new DNS zones.
 
 ### Read-Only
 
