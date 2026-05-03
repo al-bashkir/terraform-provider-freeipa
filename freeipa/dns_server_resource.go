@@ -205,21 +205,25 @@ func (r *dnsServer) Delete(ctx context.Context, req resource.DeleteRequest, resp
 
 	tflog.Debug(ctx, fmt.Sprintf("[DEBUG] Delete freeipa dns server %s — clearing managed attrs", data.ServerName.ValueString()))
 
-	delAttrs := []string{}
+	optArgs := ipa.DnsserverModOptionalArgs{}
+	var setAttrs []string
 	if !data.SOAMnameOverride.IsNull() {
-		delAttrs = append(delAttrs, "idnssoamname")
-	}
-	if !data.Forwarders.IsNull() {
-		delAttrs = append(delAttrs, "idnsforwarders")
+		setAttrs = append(setAttrs, "idnssoamname=")
 	}
 	if !data.ForwardPolicy.IsNull() {
-		delAttrs = append(delAttrs, "idnsforwardpolicy")
+		setAttrs = append(setAttrs, "idnsforwardpolicy=")
 	}
-	if len(delAttrs) == 0 {
+	if !data.Forwarders.IsNull() {
+		empty := []string{}
+		optArgs.Idnsforwarders = &empty
+	}
+	if len(setAttrs) > 0 {
+		optArgs.Setattr = &setAttrs
+	}
+	if optArgs.Idnsforwarders == nil && optArgs.Setattr == nil {
 		return
 	}
 
-	optArgs := ipa.DnsserverModOptionalArgs{Delattr: &delAttrs}
 	args := ipa.DnsserverModArgs{Idnsserverid: data.ServerName.ValueString()}
 	if _, err := r.client.DnsserverMod(&args, &optArgs); err != nil {
 		if strings.Contains(err.Error(), "EmptyModlist") {
@@ -238,22 +242,21 @@ func (r *dnsServer) ImportState(ctx context.Context, req resource.ImportStateReq
 func (r *dnsServer) buildModOptArgs(ctx context.Context, data *dnsServerModel, prev *dnsServerModel) (*ipa.DnsserverModOptionalArgs, bool) {
 	optArgs := ipa.DnsserverModOptionalArgs{}
 	hasChange := false
-	delAttrs := []string{}
+	var setAttrs []string
 
 	if prev == nil || !data.SOAMnameOverride.Equal(prev.SOAMnameOverride) {
-		if data.SOAMnameOverride.IsNull() {
-			delAttrs = append(delAttrs, "idnssoamname")
-		} else {
+		if !data.SOAMnameOverride.IsNull() {
 			var v interface{} = data.SOAMnameOverride.ValueString()
 			optArgs.Idnssoamname = &v
+			hasChange = true
+		} else if prev != nil && !prev.SOAMnameOverride.IsNull() {
+			setAttrs = append(setAttrs, "idnssoamname=")
+			hasChange = true
 		}
-		hasChange = true
 	}
 
 	if prev == nil || !data.Forwarders.Equal(prev.Forwarders) {
-		if data.Forwarders.IsNull() {
-			delAttrs = append(delAttrs, "idnsforwarders")
-		} else {
+		if !data.Forwarders.IsNull() {
 			var v []string
 			for _, value := range data.Forwarders.Elements() {
 				val, _ := strconv.Unquote(value.String())
@@ -263,20 +266,27 @@ func (r *dnsServer) buildModOptArgs(ctx context.Context, data *dnsServerModel, p
 				v = []string{}
 			}
 			optArgs.Idnsforwarders = &v
+			hasChange = true
+		} else if prev != nil && !prev.Forwarders.IsNull() {
+			empty := []string{}
+			optArgs.Idnsforwarders = &empty
+			hasChange = true
 		}
-		hasChange = true
 	}
 
 	if prev == nil || !data.ForwardPolicy.Equal(prev.ForwardPolicy) {
 		if !data.ForwardPolicy.IsNull() {
 			s := data.ForwardPolicy.ValueString()
 			optArgs.Idnsforwardpolicy = &s
+			hasChange = true
+		} else if prev != nil && !prev.ForwardPolicy.IsNull() {
+			setAttrs = append(setAttrs, "idnsforwardpolicy=")
+			hasChange = true
 		}
-		hasChange = true
 	}
 
-	if len(delAttrs) > 0 {
-		optArgs.Delattr = &delAttrs
+	if len(setAttrs) > 0 {
+		optArgs.Setattr = &setAttrs
 	}
 	return &optArgs, hasChange
 }

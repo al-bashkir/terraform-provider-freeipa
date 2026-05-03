@@ -116,7 +116,7 @@ func TestAccFreeIPADNSGlobalConfig_import(t *testing.T) {
 				ImportState:             true,
 				ImportStateId:           "global",
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"forwarders", "allow_sync_ptr", "zone_refresh"},
+				ImportStateVerifyIgnore: []string{"forwarders", "forward_policy", "allow_sync_ptr", "zone_refresh"},
 			},
 		},
 	})
