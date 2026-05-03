@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -308,7 +307,7 @@ func (r *dnsServer) readServer(ctx context.Context, data *dnsServerModel, diags 
 		if v, ok := decodeIPAString(srv.Idnssoamname); ok {
 			data.SOAMnameOverride = types.StringValue(v)
 		} else {
-			data.SOAMnameOverride = types.StringNull()
+			tflog.Warn(ctx, fmt.Sprintf("[WARN] dns server %s: idnssoamname not returned by show; preserving state value %q", data.ServerName.ValueString(), data.SOAMnameOverride.ValueString()))
 		}
 	}
 
@@ -318,7 +317,7 @@ func (r *dnsServer) readServer(ctx context.Context, data *dnsServerModel, diags 
 			diags.Append(d...)
 			data.Forwarders = v
 		} else {
-			data.Forwarders = types.ListValueMust(types.StringType, []attr.Value{})
+			tflog.Warn(ctx, fmt.Sprintf("[WARN] dns server %s: idnsforwarders not returned by show; preserving state list", data.ServerName.ValueString()))
 		}
 	}
 
@@ -326,7 +325,7 @@ func (r *dnsServer) readServer(ctx context.Context, data *dnsServerModel, diags 
 		if srv.Idnsforwardpolicy != nil {
 			data.ForwardPolicy = types.StringValue(*srv.Idnsforwardpolicy)
 		} else {
-			data.ForwardPolicy = types.StringNull()
+			tflog.Warn(ctx, fmt.Sprintf("[WARN] dns server %s: idnsforwardpolicy not returned by show; preserving state value %q", data.ServerName.ValueString(), data.ForwardPolicy.ValueString()))
 		}
 	}
 
