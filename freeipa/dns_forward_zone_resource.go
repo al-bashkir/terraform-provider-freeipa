@@ -155,14 +155,31 @@ func (r *dnsForwardZone) Create(ctx context.Context, req resource.CreateRequest,
 
 	res, err := r.client.DnsforwardzoneAdd(&ipa.DnsforwardzoneAddArgs{}, &addOpt)
 	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error creating freeipa dns forward zone: %s", err))
-		return
+		if !strings.Contains(err.Error(), "unexpected value for field Managedby") {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error creating freeipa dns forward zone: %s", err))
+			return
+		}
+		// FreeIPA >= 4.12 returns managedby: null in the Add response; the zone was
+		// created — fetch the canonical name via Show (no All, avoids the same issue).
+		var showName interface{} = data.ZoneName.ValueString()
+		showRes, showErr := r.client.DnsforwardzoneShow(
+			&ipa.DnsforwardzoneShowArgs{},
+			&ipa.DnsforwardzoneShowOptionalArgs{Idnsname: &showName},
+		)
+		if showErr != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error verifying freeipa dns forward zone after create: %s", showErr))
+			return
+		}
+		dnsnames := showRes.Result.Idnsname.([]interface{})
+		dnsname := dnsnames[0].(map[string]interface{})["__dns_name__"].(string)
+		data.Id = types.StringValue(dnsname)
+		data.ComputedZoneName = types.StringValue(dnsname)
+	} else {
+		dnsnames := res.Result.Idnsname.([]interface{})
+		dnsname := dnsnames[0].(map[string]interface{})["__dns_name__"].(string)
+		data.Id = types.StringValue(dnsname)
+		data.ComputedZoneName = types.StringValue(dnsname)
 	}
-
-	dnsnames := res.Result.Idnsname.([]interface{})
-	dnsname := dnsnames[0].(map[string]interface{})["__dns_name__"].(string)
-	data.Id = types.StringValue(dnsname)
-	data.ComputedZoneName = types.StringValue(dnsname)
 
 	if data.DisableZone.ValueBool() {
 		var idName interface{} = data.Id.ValueString()
@@ -304,11 +321,10 @@ func (r *dnsForwardZone) Delete(ctx context.Context, req resource.DeleteRequest,
 }
 
 func (r *dnsForwardZone) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	all := true
 	var name interface{} = req.ID
 	res, err := r.client.DnsforwardzoneShow(
 		&ipa.DnsforwardzoneShowArgs{},
-		&ipa.DnsforwardzoneShowOptionalArgs{Idnsname: &name, All: &all},
+		&ipa.DnsforwardzoneShowOptionalArgs{Idnsname: &name},
 	)
 	if err != nil {
 		resp.Diagnostics.AddError("Import Error", fmt.Sprintf("Error reading freeipa dns forward zone: %s", err))
@@ -335,14 +351,13 @@ func (r *dnsForwardZone) ImportState(ctx context.Context, req resource.ImportSta
 }
 
 func (r *dnsForwardZone) readZone(ctx context.Context, data *dnsForwardZoneModel, diags *diag.Diagnostics) (*ipa.Dnsforwardzone, error) {
-	all := true
 	var name interface{} = data.Id.ValueString()
 	if data.Id.IsNull() || data.Id.ValueString() == "" {
 		name = data.ZoneName.ValueString()
 	}
 	res, err := r.client.DnsforwardzoneShow(
 		&ipa.DnsforwardzoneShowArgs{},
-		&ipa.DnsforwardzoneShowOptionalArgs{Idnsname: &name, All: &all},
+		&ipa.DnsforwardzoneShowOptionalArgs{Idnsname: &name},
 	)
 	if err != nil {
 		return nil, err

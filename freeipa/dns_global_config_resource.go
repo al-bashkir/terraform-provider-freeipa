@@ -204,26 +204,26 @@ func (r *dnsGlobalConfig) Delete(ctx context.Context, req resource.DeleteRequest
 
 	defaultPolicy := "first"
 	defaultAllowSync := false
-	delAttrs := []string{}
-	if !data.Forwarders.IsNull() {
-		delAttrs = append(delAttrs, "idnsforwarders")
-	}
-	if !data.ZoneRefresh.IsNull() {
-		delAttrs = append(delAttrs, "idnszonerefresh")
-	}
-
 	optArgs := ipa.DnsconfigModOptionalArgs{}
+	var setAttrs []string
 	if !data.ForwardPolicy.IsNull() {
 		optArgs.Idnsforwardpolicy = &defaultPolicy
 	}
 	if !data.AllowSyncPTR.IsNull() {
 		optArgs.Idnsallowsyncptr = &defaultAllowSync
 	}
-	if len(delAttrs) > 0 {
-		optArgs.Delattr = &delAttrs
+	if !data.Forwarders.IsNull() {
+		empty := []string{}
+		optArgs.Idnsforwarders = &empty
+	}
+	if !data.ZoneRefresh.IsNull() {
+		setAttrs = append(setAttrs, "idnszonerefresh=")
+	}
+	if len(setAttrs) > 0 {
+		optArgs.Setattr = &setAttrs
 	}
 
-	if optArgs.Idnsforwardpolicy == nil && optArgs.Idnsallowsyncptr == nil && optArgs.Delattr == nil {
+	if optArgs.Idnsforwardpolicy == nil && optArgs.Idnsallowsyncptr == nil && optArgs.Idnsforwarders == nil && optArgs.Setattr == nil {
 		return
 	}
 
@@ -247,12 +247,10 @@ func (r *dnsGlobalConfig) ImportState(ctx context.Context, req resource.ImportSt
 func (r *dnsGlobalConfig) buildModOptArgs(ctx context.Context, data *dnsGlobalConfigModel, prev *dnsGlobalConfigModel) (*ipa.DnsconfigModOptionalArgs, bool) {
 	optArgs := ipa.DnsconfigModOptionalArgs{}
 	hasChange := false
-	delAttrs := []string{}
+	var setAttrs []string
 
 	if prev == nil || !data.Forwarders.Equal(prev.Forwarders) {
-		if data.Forwarders.IsNull() {
-			delAttrs = append(delAttrs, "idnsforwarders")
-		} else {
+		if !data.Forwarders.IsNull() {
 			var v []string
 			for _, value := range data.Forwarders.Elements() {
 				val, _ := strconv.Unquote(value.String())
@@ -262,38 +260,46 @@ func (r *dnsGlobalConfig) buildModOptArgs(ctx context.Context, data *dnsGlobalCo
 				v = []string{}
 			}
 			optArgs.Idnsforwarders = &v
+			hasChange = true
+		} else if prev != nil {
+			// Update: forwarders cleared — pass empty list.
+			empty := []string{}
+			optArgs.Idnsforwarders = &empty
+			hasChange = true
 		}
-		hasChange = true
+		// Create + null: leave server default unchanged.
 	}
 
 	if prev == nil || !data.ForwardPolicy.Equal(prev.ForwardPolicy) {
 		if !data.ForwardPolicy.IsNull() {
 			s := data.ForwardPolicy.ValueString()
 			optArgs.Idnsforwardpolicy = &s
+			hasChange = true
 		}
-		hasChange = true
 	}
 
 	if prev == nil || !data.AllowSyncPTR.Equal(prev.AllowSyncPTR) {
 		if !data.AllowSyncPTR.IsNull() {
 			b := data.AllowSyncPTR.ValueBool()
 			optArgs.Idnsallowsyncptr = &b
+			hasChange = true
 		}
-		hasChange = true
 	}
 
 	if prev == nil || !data.ZoneRefresh.Equal(prev.ZoneRefresh) {
-		if data.ZoneRefresh.IsNull() {
-			delAttrs = append(delAttrs, "idnszonerefresh")
-		} else {
+		if !data.ZoneRefresh.IsNull() {
 			n := int(data.ZoneRefresh.ValueInt64())
 			optArgs.Idnszonerefresh = &n
+			hasChange = true
+		} else if prev != nil && !prev.ZoneRefresh.IsNull() {
+			// Update: zone_refresh cleared — use setattr to unset.
+			setAttrs = append(setAttrs, "idnszonerefresh=")
+			hasChange = true
 		}
-		hasChange = true
 	}
 
-	if len(delAttrs) > 0 {
-		optArgs.Delattr = &delAttrs
+	if len(setAttrs) > 0 {
+		optArgs.Setattr = &setAttrs
 	}
 
 	return &optArgs, hasChange
