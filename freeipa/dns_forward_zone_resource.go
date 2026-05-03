@@ -50,6 +50,27 @@ func canonicalZoneName(name string) string {
 	return n
 }
 
+// caseInsensitiveZoneNameModifier suppresses spurious diffs on zone_name when
+// the change is only in casing (FreeIPA treats DNS names case-insensitively).
+type caseInsensitiveZoneNameModifier struct{}
+
+func (m caseInsensitiveZoneNameModifier) Description(_ context.Context) string {
+	return "Suppresses plan diff when zone name differs only in case."
+}
+
+func (m caseInsensitiveZoneNameModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m caseInsensitiveZoneNameModifier) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if req.StateValue.IsNull() || req.PlanValue.IsNull() || req.PlanValue.IsUnknown() {
+		return
+	}
+	if canonicalZoneName(req.StateValue.ValueString()) == canonicalZoneName(req.PlanValue.ValueString()) {
+		resp.PlanValue = req.StateValue
+	}
+}
+
 type dnsForwardZoneModel struct {
 	Id               types.String `tfsdk:"id"`
 	ZoneName         types.String `tfsdk:"zone_name"`
@@ -99,18 +120,8 @@ func (r *dnsForwardZone) Schema(ctx context.Context, req resource.SchemaRequest,
 				Required:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
-					stringplanmodifier.RequiresReplaceIf(
-						func(ctx context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
-							if req.StateValue.IsNull() || req.PlanValue.IsNull() {
-								return
-							}
-							if canonicalZoneName(req.StateValue.ValueString()) != canonicalZoneName(req.PlanValue.ValueString()) {
-								resp.RequiresReplace = true
-							}
-						},
-						"Zone name change requires replacement (case-insensitive comparison).",
-						"Zone name change requires replacement (case-insensitive comparison).",
-					),
+					caseInsensitiveZoneNameModifier{},
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"forwarders": schema.ListAttribute{
