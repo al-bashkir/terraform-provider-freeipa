@@ -86,6 +86,33 @@ func TestAccFreeIPADNSServer_update(t *testing.T) {
 	})
 }
 
+func TestAccFreeIPADNSServer_soaMname(t *testing.T) {
+	name := dnsServerName(t)
+	cfg := map[string]string{
+		"index":              "0",
+		"server_name":        `"` + name + `"`,
+		"soa_mname_override": `"` + name + `."`,
+	}
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccFreeIPAProvider() + testAccFreeIPADNSServer_resource(cfg),
+				Check: resource.TestCheckResourceAttr(
+					"freeipa_dns_server.dns-server-0", "soa_mname_override", name+".",
+				),
+			},
+			{
+				Config: testAccFreeIPAProvider() + testAccFreeIPADNSServer_resource(cfg),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
+}
+
 func TestAccFreeIPADNSServer_notFound(t *testing.T) {
 	cfg := map[string]string{
 		"index":          "0",
@@ -120,7 +147,7 @@ func TestAccFreeIPADNSServer_import(t *testing.T) {
 				ImportState:             true,
 				ImportStateId:           dnsServerName(t),
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"forwarders", "soa_mname_override", "forward_policy"},
+				ImportStateVerifyIgnore: []string{"forwarders", "forward_policy"},
 			},
 		},
 	})
