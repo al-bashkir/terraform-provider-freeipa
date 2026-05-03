@@ -99,7 +99,18 @@ func (r *dnsForwardZone) Schema(ctx context.Context, req resource.SchemaRequest,
 				Required:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.RequiresReplaceIf(
+						func(ctx context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
+							if req.StateValue.IsNull() || req.PlanValue.IsNull() {
+								return
+							}
+							if canonicalZoneName(req.StateValue.ValueString()) != canonicalZoneName(req.PlanValue.ValueString()) {
+								resp.RequiresReplace = true
+							}
+						},
+						"Zone name change requires replacement (case-insensitive comparison).",
+						"Zone name change requires replacement (case-insensitive comparison).",
+					),
 				},
 			},
 			"forwarders": schema.ListAttribute{
@@ -287,9 +298,13 @@ func (r *dnsForwardZone) Update(ctx context.Context, req resource.UpdateRequest,
 
 	if hasChange {
 		if _, err := r.client.DnsforwardzoneMod(&ipa.DnsforwardzoneModArgs{}, &modOpt); err != nil {
-			if strings.Contains(err.Error(), "EmptyModlist") {
+			switch {
+			case strings.Contains(err.Error(), "EmptyModlist"):
 				resp.Diagnostics.AddWarning("Client Warning", err.Error())
-			} else {
+			case isManagedbyNullErr(err):
+				// FreeIPA >= 4.12: Mod succeeded server-side; only the response decode failed.
+				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Mod response decode failed (FreeIPA >= 4.12 managedby:null): %s", err))
+			default:
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error updating freeipa dns forward zone: %s", err))
 				return
 			}
