@@ -45,11 +45,11 @@ resource "freeipa_dns_global_config" "global" {
 
 - `allow_sync_ptr` (Boolean) Allow synchronization of forward (A, AAAA) and reverse (PTR) records.
 - `forward_policy` (String) Global forwarding policy. One of `only`, `first`, `none`. Set to `none` to disable any configured global forwarders.
-- `forwarders` (List of String) Global forwarders. A custom port can be specified for each forwarder using a standard format `IP_ADDRESS port PORT`.
+- `forwarders` (Set of String) Global forwarders. A custom port can be specified for each forwarder using a standard format `IP_ADDRESS port PORT`.
 
 ### Read-Only
 
-- `dns_servers` (List of String) List of IPA masters configured as DNS servers. Read-only.
+- `dns_servers` (Set of String) Set of IPA masters configured as DNS servers. Read-only.
 - `dnssec_key_master` (String) IPA server configured as DNSSec key master. Read-only.
 - `id` (String) ID of the resource. Always `global` for this singleton.
 - `ipa_dns_version` (Number) IPA DNS version. Read-only.

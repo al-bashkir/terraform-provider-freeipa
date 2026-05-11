@@ -74,7 +74,7 @@ func (m caseInsensitiveZoneNameModifier) PlanModifyString(_ context.Context, req
 type dnsForwardZoneModel struct {
 	Id               types.String `tfsdk:"id"`
 	ZoneName         types.String `tfsdk:"zone_name"`
-	Forwarders       types.List   `tfsdk:"forwarders"`
+	Forwarders       types.Set    `tfsdk:"forwarders"`
 	ForwardPolicy    types.String `tfsdk:"forward_policy"`
 	DisableZone      types.Bool   `tfsdk:"disable_zone"`
 	SkipOverlapCheck types.Bool   `tfsdk:"skip_overlap_check"`
@@ -124,7 +124,7 @@ func (r *dnsForwardZone) Schema(ctx context.Context, req resource.SchemaRequest,
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"forwarders": schema.ListAttribute{
+			"forwarders": schema.SetAttribute{
 				MarkdownDescription: "Per-zone forwarders. A custom port can be specified using a standard format `IP_ADDRESS port PORT`.",
 				Required:            true,
 				ElementType:         types.StringType,
@@ -438,11 +438,11 @@ func (r *dnsForwardZone) readZone(ctx context.Context, data *dnsForwardZoneModel
 	}
 
 	if z.Idnsforwarders != nil {
-		v, d := types.ListValueFrom(ctx, types.StringType, *z.Idnsforwarders)
+		v, d := types.SetValueFrom(ctx, types.StringType, *z.Idnsforwarders)
 		diags.Append(d...)
 		data.Forwarders = v
 	} else {
-		data.Forwarders = types.ListValueMust(types.StringType, []attr.Value{})
+		data.Forwarders = types.SetValueMust(types.StringType, []attr.Value{})
 	}
 
 	if z.Idnsforwardpolicy != nil {

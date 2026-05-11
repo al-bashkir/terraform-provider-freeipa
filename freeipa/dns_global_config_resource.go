@@ -34,10 +34,10 @@ type dnsGlobalConfig struct {
 
 type dnsGlobalConfigModel struct {
 	Id              types.String `tfsdk:"id"`
-	Forwarders      types.List   `tfsdk:"forwarders"`
+	Forwarders      types.Set    `tfsdk:"forwarders"`
 	ForwardPolicy   types.String `tfsdk:"forward_policy"`
 	AllowSyncPTR    types.Bool   `tfsdk:"allow_sync_ptr"`
-	DNSServers      types.List   `tfsdk:"dns_servers"`
+	DNSServers      types.Set    `tfsdk:"dns_servers"`
 	DNSSECKeyMaster types.String `tfsdk:"dnssec_key_master"`
 	IPADNSVersion   types.Int64  `tfsdk:"ipa_dns_version"`
 }
@@ -61,7 +61,7 @@ func (r *dnsGlobalConfig) Schema(ctx context.Context, req resource.SchemaRequest
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"forwarders": schema.ListAttribute{
+			"forwarders": schema.SetAttribute{
 				MarkdownDescription: "Global forwarders. A custom port can be specified for each forwarder using a standard format `IP_ADDRESS port PORT`.",
 				Optional:            true,
 				ElementType:         types.StringType,
@@ -77,8 +77,8 @@ func (r *dnsGlobalConfig) Schema(ctx context.Context, req resource.SchemaRequest
 				MarkdownDescription: "Allow synchronization of forward (A, AAAA) and reverse (PTR) records.",
 				Optional:            true,
 			},
-			"dns_servers": schema.ListAttribute{
-				MarkdownDescription: "List of IPA masters configured as DNS servers. Read-only.",
+			"dns_servers": schema.SetAttribute{
+				MarkdownDescription: "Set of IPA masters configured as DNS servers. Read-only.",
 				Computed:            true,
 				ElementType:         types.StringType,
 			},
@@ -288,11 +288,11 @@ func (r *dnsGlobalConfig) readGlobalConfig(ctx context.Context, data *dnsGlobalC
 	cfg := &res.Result
 
 	if cfg.DNSServerServer != nil {
-		v, d := types.ListValueFrom(ctx, types.StringType, *cfg.DNSServerServer)
+		v, d := types.SetValueFrom(ctx, types.StringType, *cfg.DNSServerServer)
 		diags.Append(d...)
 		data.DNSServers = v
 	} else {
-		data.DNSServers = types.ListNull(types.StringType)
+		data.DNSServers = types.SetNull(types.StringType)
 	}
 	if cfg.DnssecKeyMasterServer != nil {
 		data.DNSSECKeyMaster = types.StringValue(*cfg.DnssecKeyMasterServer)
@@ -307,11 +307,11 @@ func (r *dnsGlobalConfig) readGlobalConfig(ctx context.Context, data *dnsGlobalC
 
 	if !data.Forwarders.IsNull() {
 		if cfg.Idnsforwarders != nil {
-			v, d := types.ListValueFrom(ctx, types.StringType, *cfg.Idnsforwarders)
+			v, d := types.SetValueFrom(ctx, types.StringType, *cfg.Idnsforwarders)
 			diags.Append(d...)
 			data.Forwarders = v
 		} else {
-			data.Forwarders = types.ListValueMust(types.StringType, []attr.Value{})
+			data.Forwarders = types.SetValueMust(types.StringType, []attr.Value{})
 		}
 	}
 	if !data.ForwardPolicy.IsNull() {

@@ -45,7 +45,7 @@ resource "freeipa_dns_forward_zone" "internal" {
 
 ### Required
 
-- `forwarders` (List of String) Per-zone forwarders. A custom port can be specified using a standard format `IP_ADDRESS port PORT`.
+- `forwarders` (Set of String) Per-zone forwarders. A custom port can be specified using a standard format `IP_ADDRESS port PORT`.
 - `zone_name` (String) Forward zone name (FQDN).
 
 ### Optional

@@ -50,7 +50,7 @@ resource "freeipa_dns_server" "ipa1" {
 ### Optional
 
 - `forward_policy` (String) Per-server conditional forwarding policy. One of `only`, `first`, `none`.
-- `forwarders` (List of String) Per-server forwarders. A custom port can be specified using a standard format `IP_ADDRESS port PORT`.
+- `forwarders` (Set of String) Per-server forwarders. A custom port can be specified using a standard format `IP_ADDRESS port PORT`.
 - `soa_mname_override` (String) SOA mname (authoritative server) override for zones served by this replica.
 
 ### Read-Only

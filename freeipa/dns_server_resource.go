@@ -35,7 +35,7 @@ type dnsServerModel struct {
 	Id               types.String `tfsdk:"id"`
 	ServerName       types.String `tfsdk:"server_name"`
 	SOAMnameOverride types.String `tfsdk:"soa_mname_override"`
-	Forwarders       types.List   `tfsdk:"forwarders"`
+	Forwarders       types.Set    `tfsdk:"forwarders"`
 	ForwardPolicy    types.String `tfsdk:"forward_policy"`
 }
 
@@ -84,7 +84,7 @@ func (r *dnsServer) Schema(ctx context.Context, req resource.SchemaRequest, resp
 				MarkdownDescription: "SOA mname (authoritative server) override for zones served by this replica.",
 				Optional:            true,
 			},
-			"forwarders": schema.ListAttribute{
+			"forwarders": schema.SetAttribute{
 				MarkdownDescription: "Per-server forwarders. A custom port can be specified using a standard format `IP_ADDRESS port PORT`.",
 				Optional:            true,
 				ElementType:         types.StringType,
@@ -313,11 +313,11 @@ func (r *dnsServer) readServer(ctx context.Context, data *dnsServerModel, diags 
 
 	if !data.Forwarders.IsNull() {
 		if srv.Idnsforwarders != nil {
-			v, d := types.ListValueFrom(ctx, types.StringType, *srv.Idnsforwarders)
+			v, d := types.SetValueFrom(ctx, types.StringType, *srv.Idnsforwarders)
 			diags.Append(d...)
 			data.Forwarders = v
 		} else {
-			tflog.Warn(ctx, fmt.Sprintf("[WARN] dns server %s: idnsforwarders not returned by show; preserving state list", data.ServerName.ValueString()))
+			tflog.Warn(ctx, fmt.Sprintf("[WARN] dns server %s: idnsforwarders not returned by show; preserving state set", data.ServerName.ValueString()))
 		}
 	}
 
